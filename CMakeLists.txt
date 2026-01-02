@@ -19,7 +19,7 @@ target_link_libraries(VitaIPTV
     jpeg
     z
     m
-    SceAppMgr_stub        # Questo DEVE restare
+    SceAppMgr_stub
     ScePgf_stub
     SceGxm_stub
     SceDisplay_stub
@@ -31,4 +31,5 @@ target_link_libraries(VitaIPTV
     SceAudio_stub
 )
 
-vita_create_vpk(VitaIPTV "IPTV00001" "My IPTV Player")
+# MODIFICA QUI: Ho tolto gli spazi nel nome "My_IPTV_Player"
+vita_create_vpk(VitaIPTV "IPTV00001" "My_IPTV_Player")
