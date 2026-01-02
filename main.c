@@ -28,27 +28,27 @@ void av_free(void *unused, void *ptr) { free(ptr); }
 #define CLR_TEXT    0xFFFFFFFF
 #define CLR_DIR     0xFFFFAA00
 #define CLR_SUB     0xFF00FF88
+#define CLR_BAR_BG  0xFF444444
 
 enum { STATE_BROWSER, STATE_EPISODES, STATE_RESOLUTIONS, STATE_PLAYING };
 int app_state = STATE_BROWSER;
 
-// Dati Browser
 typedef struct { char name[256]; int is_dir; } Entry;
 Entry entries[200];
 int entry_count = 0;
 char cur_path[512] = "ux0:";
 int sel = 0;
 
-// Dati Playlist/Episodi
 typedef struct { char title[256]; char url[1024]; } ListEntry;
 ListEntry episodes[500];
 ListEntry resolutions[20];
 int ep_count = 0, res_count = 0, ep_sel = 0, res_sel = 0;
 
-// Variabili Player
 SceAvPlayerHandle player = -1;
 vita2d_texture *video_tex = NULL;
 int is_playing = 0;
+
+// --- FUNZIONI DI SUPPORTO (Browser e Parser) ---
 
 void scan_dir(const char *path) {
     DIR *d = opendir(path);
@@ -115,6 +115,7 @@ int main() {
     while (1) {
         sceCtrlPeekBufferPositive(0, &pad, 1);
         
+        // Logica navigazione (Browser -> Episodi -> Risoluzioni)
         if (app_state == STATE_BROWSER) {
             if ((pad.buttons & SCE_CTRL_DOWN) && !(old_pad.buttons & SCE_CTRL_DOWN)) sel = (sel + 1) % entry_count;
             if ((pad.buttons & SCE_CTRL_UP) && !(old_pad.buttons & SCE_CTRL_UP)) sel = (sel - 1 + entry_count) % entry_count;
@@ -158,25 +159,7 @@ int main() {
         vita2d_start_drawing();
         vita2d_clear_screen(CLR_BG);
 
-        if (app_state == STATE_BROWSER) {
-            vita2d_pgf_draw_text(pgf, 20, 40, CLR_ACCENT, 1.0f, "1. BROWSER FILE");
-            for (int i = 0; i < entry_count && i < 15; i++) {
-                uint32_t c = (i == sel) ? CLR_ACCENT : (entries[i].is_dir ? CLR_DIR : CLR_TEXT);
-                vita2d_pgf_draw_text(pgf, 30, 100 + (i * 30), c, 1.0f, entries[i].name);
-            }
-        } else if (app_state == STATE_EPISODES) {
-            vita2d_pgf_draw_text(pgf, 20, 40, CLR_SUB, 1.0f, "2. SCEGLI EPISODIO");
-            for (int i = 0; i < ep_count && i < 15; i++) {
-                uint32_t c = (i == ep_sel) ? CLR_SUB : CLR_TEXT;
-                vita2d_pgf_draw_text(pgf, 30, 100 + (i * 30), c, 1.0f, episodes[i].title);
-            }
-        } else if (app_state == STATE_RESOLUTIONS) {
-            vita2d_pgf_draw_text(pgf, 20, 40, CLR_ACCENT, 1.0f, "3. SCEGLI QUALITA'");
-            for (int i = 0; i < res_count; i++) {
-                uint32_t c = (i == res_sel) ? CLR_ACCENT : CLR_TEXT;
-                vita2d_pgf_draw_text(pgf, 30, 100 + (i * 40), c, 1.0f, resolutions[i].title);
-            }
-        } else if (is_playing) {
+        if (app_state == STATE_PLAYING) {
             SceAvPlayerFrameInfo frame;
             if (sceAvPlayerGetVideoData(player, &frame)) {
                 if (!video_tex) video_tex = vita2d_create_empty_texture_format(frame.details.video.width, frame.details.video.height, SCE_GXM_TEXTURE_FORMAT_YVU420P2_CSC1);
@@ -184,7 +167,41 @@ int main() {
                 memcpy(data, frame.pData, (frame.details.video.width * frame.details.video.height * 3 / 2));
                 vita2d_draw_texture_scale(video_tex, 0, 0, 960.0f/frame.details.video.width, 544.0f/frame.details.video.height);
             } else {
-                vita2d_pgf_draw_text(pgf, 400, 272, CLR_ACCENT, 1.0f, "Buffering...");
+                // DISEGNO BARRA DI CARICAMENTO
+                int fill = 0;
+                // Otteniamo la percentuale del buffer (0-100)
+                // Usiamo un valore fittizio basato sullo stato se l'SDK non ritorna il valore preciso immediatamente
+                vita2d_pgf_draw_text(pgf, 380, 250, CLR_ACCENT, 1.3f, "CARICAMENTO...");
+                
+                // Disegno sfondo barra
+                vita2d_draw_rectangle(280, 280, 400, 20, CLR_BAR_BG);
+                // In uno streaming reale HLS, il buffering è asincrono. 
+                // Disegniamo una barra che pulsa per indicare attività
+                static int anim = 0; anim = (anim + 5) % 400;
+                vita2d_draw_rectangle(280, 280, anim, 20, CLR_ACCENT);
+                
+                vita2d_pgf_draw_text(pgf, 320, 330, CLR_TEXT, 0.8f, "Connessione al server in corso...");
+            }
+        } else {
+            // DISEGNO MENU (Browser/Episodi/Risoluzioni)
+            if (app_state == STATE_BROWSER) {
+                vita2d_pgf_draw_text(pgf, 20, 40, CLR_ACCENT, 1.0f, "1. BROWSER FILE");
+                for (int i = 0; i < entry_count && i < 15; i++) {
+                    uint32_t c = (i == sel) ? CLR_ACCENT : (entries[i].is_dir ? CLR_DIR : CLR_TEXT);
+                    vita2d_pgf_draw_text(pgf, 30, 100 + (i * 30), c, 1.0f, entries[i].name);
+                }
+            } else if (app_state == STATE_EPISODES) {
+                vita2d_pgf_draw_text(pgf, 20, 40, CLR_SUB, 1.0f, "2. SCEGLI EPISODIO");
+                for (int i = 0; i < ep_count && i < 15; i++) {
+                    uint32_t c = (i == ep_sel) ? CLR_SUB : CLR_TEXT;
+                    vita2d_pgf_draw_text(pgf, 30, 100 + (i * 30), c, 1.0f, episodes[i].title);
+                }
+            } else if (app_state == STATE_RESOLUTIONS) {
+                vita2d_pgf_draw_text(pgf, 20, 40, CLR_ACCENT, 1.0f, "3. SCEGLI QUALITA'");
+                for (int i = 0; i < res_count; i++) {
+                    uint32_t c = (i == res_sel) ? CLR_ACCENT : CLR_TEXT;
+                    vita2d_pgf_draw_text(pgf, 30, 100 + (i * 40), c, 1.0f, resolutions[i].title);
+                }
             }
         }
 
