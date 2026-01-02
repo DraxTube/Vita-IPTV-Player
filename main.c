@@ -6,51 +6,51 @@
 #include <stdlib.h>
 #include <string.h>
 
+// --- HACK PER IL LINKER ---
+// Creiamo funzioni vuote per ingannare la libreria vita2d
+// che cerca funzioni non presenti nel toolchain standard.
+int sceSharedFbClose() { return 0; }
+int sceSharedFbOpen() { return 0; }
+int sceSharedFbGetInfo() { return 0; }
+int sceSharedFbEnd() { return 0; }
+int sceSharedFbBegin() { return 0; }
+int _sceSharedFbOpen() { return 0; }
+// --------------------------
+
 // Colori
 #define WHITE 0xFFFFFFFF
 #define GREEN 0xFF00FF00
 #define RED   0xFF0000FF
 
 int main() {
-    // Carichiamo i moduli necessari (Rete e Video)
+    // Carichiamo moduli
     sceSysmoduleLoadModule(SCE_SYSMODULE_NET);
     sceSysmoduleLoadModule(SCE_SYSMODULE_AVPLAYER);
 
-    // Inizializza la grafica 2D
+    // Inizializza la grafica
     vita2d_init();
-    vita2d_set_clear_color(0xFF000000); // Sfondo nero
+    vita2d_set_clear_color(0xFF000000); 
 
-    // Prepara i font
     vita2d_pgf *pgf = vita2d_load_default_pgf();
 
-    // Loop principale dell'app
     while (1) {
-        // Legge i tasti
         SceCtrlData pad;
         sceCtrlPeekBufferPositive(0, &pad, 1);
 
-        // Se premi START, esci
         if (pad.buttons & SCE_CTRL_START)
             break;
 
-        // Inizio disegno
         vita2d_start_drawing();
         vita2d_clear_screen();
 
-        // Disegna testo a schermo
-        vita2d_pgf_draw_text(pgf, 20, 40, GREEN, 1.0f, "PS Vita IPTV Player - Template");
-        vita2d_pgf_draw_text(pgf, 20, 80, WHITE, 1.0f, "Premi X per caricare (Simulazione)");
+        vita2d_pgf_draw_text(pgf, 20, 40, GREEN, 1.0f, "PS Vita IPTV Player - SUCCESS!");
+        vita2d_pgf_draw_text(pgf, 20, 80, WHITE, 1.0f, "Se leggi questo, il VPK funziona.");
         vita2d_pgf_draw_text(pgf, 20, 100, WHITE, 1.0f, "Premi START per uscire");
-
-        if (pad.buttons & SCE_CTRL_CROSS) {
-            vita2d_pgf_draw_text(pgf, 20, 150, RED, 1.0f, "Tentativo connessione stream...");
-        }
 
         vita2d_end_drawing();
         vita2d_swap_buffers();
     }
 
-    // Pulisce la memoria prima di uscire
     vita2d_fini();
     vita2d_free_pgf(pgf);
     sceSysmoduleUnloadModule(SCE_SYSMODULE_NET);
