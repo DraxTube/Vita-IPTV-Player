@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <dirent.h>
 #include <sys/stat.h>
-#include <malloc.h> // Importante per memalign
+#include <malloc.h>
 
 // --- FIX LINKER ---
 int sceSharedFbClose() { return 0; }
@@ -22,7 +22,6 @@ int sceSharedFbBegin() { return 0; }
 int _sceSharedFbOpen() { return 0; }
 
 // --- FIX MEMORIA PER DECODER HARDWARE ---
-// SceAvPlayer richiede memoria allineata per funzionare bene
 void *av_malloc(void *u, unsigned int a, unsigned int s) { 
     return memalign(a, s); 
 }
@@ -104,8 +103,9 @@ void start_vid(const char *url) {
     init.memoryReplacement.allocateTexture = av_malloc;
     init.memoryReplacement.deallocateTexture = av_free;
     init.basePriority = 160;
-    init.numOutputVideoFrameBuffers = 2; // Migliora fluidità
+    init.numOutputVideoFrameBuffers = 2; 
     init.autoStart = SCE_TRUE;
+    init.debugLevel = 0; 
     
     player = sceAvPlayerInit(&init);
     sceAvPlayerAddSource(player, url);
@@ -113,13 +113,12 @@ void start_vid(const char *url) {
 }
 
 int main() {
-    // Caricamento moduli essenziali per lo streaming HTTPS
+    // CARICAMENTO MODULI CORRETTO
     sceSysmoduleLoadModule(SCE_SYSMODULE_NET);
-    sceSysmoduleLoadModule(SCE_SYSMODULE_SSL);    // NECESSARIO
-    sceSysmoduleLoadModule(SCE_SYSMODULE_HTTPS);  // NECESSARIO
+    sceSysmoduleLoadModule(SCE_SYSMODULE_SSL);  // NECESSARIO per HTTPS
+    sceSysmoduleLoadModule(SCE_SYSMODULE_HTTP); // <--- CORRETTO (non HTTPS)
     sceSysmoduleLoadModule(SCE_SYSMODULE_AVPLAYER);
     
-    // Aumento buffer di rete a 4MB per stabilità
     SceNetInitParam netParam; 
     netParam.memory = malloc(4*1024*1024); 
     netParam.size = 4*1024*1024;
@@ -183,7 +182,7 @@ int main() {
                 static int loader = 0; loader = (loader + 5) % 400;
                 vita2d_draw_rectangle(280, 272, 400, 20, 0xFF444444);
                 vita2d_draw_rectangle(280, 272, loader, 20, CLR_ACCENT);
-                vita2d_pgf_draw_text(pgf, 320, 250, CLR_ACCENT, 1.2f, "RETE ATTIVA...");
+                vita2d_pgf_draw_text(pgf, 320, 250, CLR_ACCENT, 1.2f, "BUFFERING / CONNESSIONE...");
             }
         } else {
             if (app_state == STATE_BROWSER) {
