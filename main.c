@@ -23,7 +23,6 @@ int sceSharedFbBegin() { return 0; }
 int _sceSharedFbOpen() { return 0; }
 
 // --- FIX MEMORIA (CRITICO PER 1080p) ---
-// Usa memalign per garantire blocchi contigui per il decoder HW
 void *av_malloc(void *u, unsigned int a, unsigned int s) { 
     return memalign(a, s); 
 }
@@ -79,7 +78,6 @@ void parse_m3u(const char *path) {
     if (!f) return;
     ep_count = 0; char line[1024], title[256] = "Canale";
     while (fgets(line, sizeof(line), f) && ep_count < 500) {
-        // Rimuovi newline
         char *n = strpbrk(line, "\r\n"); if (n) *n = 0;
         
         if (strncmp(line, "#EXTINF:", 8) == 0) {
@@ -95,7 +93,6 @@ void parse_m3u(const char *path) {
 }
 
 void start_vid(const char *url) {
-    // Pulizia precedente
     if (player >= 0) { sceAvPlayerStop(player); sceAvPlayerClose(player); player = -1; }
     if (audio_port >= 0) { sceAudioOutReleasePort(audio_port); audio_port = -1; }
     if (video_tex) { vita2d_free_texture(video_tex); video_tex = NULL; }
@@ -109,33 +106,26 @@ void start_vid(const char *url) {
     init.memoryReplacement.allocateTexture = av_malloc;
     init.memoryReplacement.deallocateTexture = av_free;
     
-    // Configurazione Player per 1080p
-    init.basePriority = 100; // Priorità thread
-    init.numOutputVideoFrameBuffers = 2; // 2 frame buffer bastano, 3 consumano troppa RAM col 1080p
+    // Configurazione Player
+    init.basePriority = 100;
+    init.numOutputVideoFrameBuffers = 2; 
     init.autoStart = SCE_TRUE;
     init.debugLevel = 0; 
     
     player = sceAvPlayerInit(&init);
     
-    // --- USER AGENT TRUCCO ---
-    // Finge di essere un PC Windows con VLC/Browser per evitare blocchi IPTV
-    sceAvPlayerSetUserAgent(player, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36");
-
-    sceAvPlayerAddSource(player, url);
+    // (Rimossa chiamata UserAgent non supportata dal SDK standard)
     
-    // Audio Port: 48kHz Stereo
+    sceAvPlayerAddSource(player, url);
     audio_port = sceAudioOutOpenPort(SCE_AUDIO_OUT_PORT_TYPE_MAIN, 1024, 48000, SCE_AUDIO_OUT_MODE_STEREO);
 }
 
 int main() {
-    // --- CARICAMENTO MODULI ---
     sceSysmoduleLoadModule(SCE_SYSMODULE_NET);
-    sceSysmoduleLoadModule(SCE_SYSMODULE_SSL);  // HTTPS
-    sceSysmoduleLoadModule(SCE_SYSMODULE_HTTP); // Client HTTP
+    sceSysmoduleLoadModule(SCE_SYSMODULE_SSL);
+    sceSysmoduleLoadModule(SCE_SYSMODULE_HTTP);
     sceSysmoduleLoadModule(SCE_SYSMODULE_AVPLAYER);
     
-    // --- INIT RETE POTENZIATO ---
-    // 8MB di heap per la rete per gestire il buffering del 1080p
     SceNetInitParam netParam; 
     netParam.memory = malloc(8*1024*1024); 
     netParam.size = 8*1024*1024;
@@ -148,7 +138,7 @@ int main() {
     
     scan_dir(cur_path);
 
-    strncpy(resolutions[0].title, "Standard (Usa come default)", 255);
+    strncpy(resolutions[0].title, "Standard (Default)", 255);
     strncpy(resolutions[1].title, "Alternativo", 255);
 
     SceCtrlData pad, old_pad;
@@ -156,8 +146,6 @@ int main() {
 
     while (1) {
         sceCtrlPeekBufferPositive(0, &pad, 1);
-        
-        // Evita che lo schermo si spenga durante la visione
         sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
 
         if (app_state == STATE_BROWSER) {
@@ -180,7 +168,6 @@ int main() {
                 }
             }
             if ((pad.buttons & SCE_CTRL_TRIANGLE) && !(old_pad.buttons & SCE_CTRL_TRIANGLE)) {
-                // Torna indietro directory (semplificato)
                 strcpy(cur_path, "ux0:"); scan_dir(cur_path);
             }
         } else if (app_state == STATE_EPISODES) {
@@ -205,14 +192,11 @@ int main() {
         if (app_state == STATE_PLAYING) {
             SceAvPlayerFrameInfo a_info, v_info;
             
-            // Audio Output
             if (player >= 0 && sceAvPlayerGetAudioData(player, &a_info)) {
                  sceAudioOutOutput(audio_port, a_info.pData);
             }
             
-            // Video Output
             if (player >= 0 && sceAvPlayerGetVideoData(player, &v_info)) {
-                // Crea texture solo se cambia risoluzione o è NULL
                 if (!video_tex || 
                     vita2d_texture_get_width(video_tex) != v_info.details.video.width ||
                     vita2d_texture_get_height(video_tex) != v_info.details.video.height) {
@@ -227,28 +211,24 @@ int main() {
 
                 if (video_tex) {
                     void *data = vita2d_texture_get_datap(video_tex);
-                    // Copia YUV data
                     memcpy(data, v_info.pData, (v_info.details.video.width * v_info.details.video.height * 1.5));
                     
-                    // Scala a tutto schermo (960x544)
                     float scale_x = 960.0f / v_info.details.video.width;
                     float scale_y = 544.0f / v_info.details.video.height;
                     vita2d_draw_texture_scale(video_tex, 0, 0, scale_x, scale_y);
                 }
             } else {
-                // UI di Caricamento
                 static int loader = 0; loader = (loader + 8) % 960;
                 vita2d_draw_rectangle(0, 540, 960, 4, 0xFF444444);
                 vita2d_draw_rectangle(loader, 540, 100, 4, CLR_ACCENT);
                 
                 vita2d_pgf_draw_text(pgf, 20, 520, CLR_ACCENT, 1.2f, "BUFFERING HD...");
                 if (player >= 0 && !sceAvPlayerIsActive(player)) {
-                     vita2d_pgf_draw_text(pgf, 20, 520, CLR_ERR, 1.2f, "ERRORE STREAM O TIMEOUT");
+                     vita2d_pgf_draw_text(pgf, 20, 520, CLR_ERR, 1.2f, "ERRORE / STREAM NON VALIDO");
                 }
             }
         } else {
-            // INTERFACCIA UTENTE
-            vita2d_pgf_draw_text(pgf, 10, 25, CLR_ACCENT, 1.0f, "PS VITA IPTV PLAYER - HD EDITION");
+            vita2d_pgf_draw_text(pgf, 10, 25, CLR_ACCENT, 1.0f, "PS VITA IPTV PLAYER");
             vita2d_draw_line(0, 30, 960, 30, CLR_ACCENT);
 
             if (app_state == STATE_BROWSER) {
