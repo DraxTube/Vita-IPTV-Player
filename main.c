@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <malloc.h> // Importante per memalign
 
 // --- FIX LINKER ---
 int sceSharedFbClose() { return 0; }
@@ -19,8 +20,15 @@ int sceSharedFbGetInfo() { return 0; }
 int sceSharedFbEnd() { return 0; }
 int sceSharedFbBegin() { return 0; }
 int _sceSharedFbOpen() { return 0; }
-void *av_malloc(void *u, unsigned int a, unsigned int s) { return malloc(s); }
-void av_free(void *u, void *p) { free(p); }
+
+// --- FIX MEMORIA PER DECODER HARDWARE ---
+// SceAvPlayer richiede memoria allineata per funzionare bene
+void *av_malloc(void *u, unsigned int a, unsigned int s) { 
+    return memalign(a, s); 
+}
+void av_free(void *u, void *p) { 
+    free(p); 
+}
 
 #define CLR_ACCENT 0xFF00CCFF
 #define CLR_TEXT   0xFFFFFFFF
@@ -35,7 +43,7 @@ int app_state = STATE_BROWSER;
 typedef struct { char name[256]; int is_dir; } Entry;
 Entry entries[200];
 int entry_count = 0, sel = 0;
-char cur_path[512] = "ux0:"; // <-- Questa mancava!
+char cur_path[512] = "ux0:";
 
 // Variabili Playlist
 typedef struct { char title[256]; char url[1024]; } ListEntry;
@@ -96,6 +104,7 @@ void start_vid(const char *url) {
     init.memoryReplacement.allocateTexture = av_malloc;
     init.memoryReplacement.deallocateTexture = av_free;
     init.basePriority = 160;
+    init.numOutputVideoFrameBuffers = 2; // Migliora fluidità
     init.autoStart = SCE_TRUE;
     
     player = sceAvPlayerInit(&init);
@@ -104,10 +113,19 @@ void start_vid(const char *url) {
 }
 
 int main() {
+    // Caricamento moduli essenziali per lo streaming HTTPS
     sceSysmoduleLoadModule(SCE_SYSMODULE_NET);
+    sceSysmoduleLoadModule(SCE_SYSMODULE_SSL);    // NECESSARIO
+    sceSysmoduleLoadModule(SCE_SYSMODULE_HTTPS);  // NECESSARIO
     sceSysmoduleLoadModule(SCE_SYSMODULE_AVPLAYER);
-    SceNetInitParam netParam; netParam.memory = malloc(1024*1024); netParam.size = 1024*1024;
-    sceNetInit(&netParam); sceNetCtlInit();
+    
+    // Aumento buffer di rete a 4MB per stabilità
+    SceNetInitParam netParam; 
+    netParam.memory = malloc(4*1024*1024); 
+    netParam.size = 4*1024*1024;
+    sceNetInit(&netParam); 
+    sceNetCtlInit();
+    
     vita2d_init();
     vita2d_pgf *pgf = vita2d_load_default_pgf();
     scan_dir(cur_path);
