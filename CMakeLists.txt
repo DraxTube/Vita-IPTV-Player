@@ -1,20 +1,20 @@
 cmake_minimum_required(VERSION 3.10)
 
-# --- QUESTA È LA PARTE CHE MANCAVA ---
-# Carica le funzioni speciali (come vita_create_vpk)
+# Include essenziale per le funzioni Vita
 if(DEFINED ENV{VITASDK})
     include("$ENV{VITASDK}/share/vita.cmake")
 else()
     message(FATAL_ERROR "Please define VITASDK to point to your SDK path!")
 endif()
-# -------------------------------------
 
 project(VitaIPTV)
 
+# Opzioni compilatore
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wl,-q -O2")
 
 add_executable(VitaIPTV main.c)
 
+# Elenco librerie (AGGIORNATO con le dipendenze mancanti)
 target_link_libraries(VitaIPTV
     vita2d
     freetype
@@ -22,6 +22,8 @@ target_link_libraries(VitaIPTV
     jpeg
     z
     m
+    SceSharedFb_stub      # <--- NUOVO (Risolve sceSharedFb...)
+    SceAppMgr_stub        # <--- NUOVO (Risolve sceAppMgr...)
     ScePgf_stub
     SceGxm_stub
     SceDisplay_stub
@@ -33,5 +35,5 @@ target_link_libraries(VitaIPTV
     SceAudio_stub
 )
 
-# Ora questo comando verrà riconosciuto
+# Crea il VPK
 vita_create_vpk(VitaIPTV "IPTV00001" "My IPTV Player")
