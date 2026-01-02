@@ -1,37 +1,38 @@
 cmake_minimum_required(VERSION 3.10)
 
-# Sostituisci 'IPTV' con il Title ID univoco del tuo progetto (9 caratteri)
 set(VITA_TITLE_ID "VITAIPTV1")
 project(VitaIPTV)
 
-# Includi le librerie del VitaSDK
+# Includi le utility del VitaSDK
 include("${VITASDK}/share/vita.cmake")
 
-# Aggiungi i file sorgente (assicurati che main.c sia nella root o cambia il percorso)
+# Sorgenti
 add_executable(VitaIPTV main.c)
 
-# Link delle librerie necessarie (es. GXM, Net, Audio se le usi)
+# LINKER FIX: Aggiunte le librerie di sistema mancanti
 target_link_libraries(VitaIPTV
     vita2d
-    z
-    m
+    SceLibKernel_stub
+    SceAppMgr_stub
+    SceAppUtil_stub
     SceGxm_stub
     SceDisplay_stub
     SceCtrl_stub
     SceSysmodule_stub
     SceCommonDialog_stub
+    ScePgf_stub
+    SceFont_stub
     SceNet_stub
     SceNetCtl_stub
+    SceAvPlayer_stub
+    z
+    m
 )
 
-# 1. Crea il file .self (necessario per il VPK)
+# Creazione file eseguibile per Vita
 vita_create_self(VitaIPTV.self VitaIPTV)
 
-# 2. Crea il file .vpk
-# NOTA: Rimosso il riferimento errato a 'IPTV' che causava il crash.
-# Se hai icone o cartelle da aggiungere, usa: FILE percorso/file destinazione
+# Creazione pacchetto VPK finale
 vita_create_vpk(VitaIPTV.vpk ${VITA_TITLE_ID} VitaIPTV.self
     NAME "Vita IPTV Player"
-    # Se hai una cartella di risorse chiamata 'assets', decommenta la riga sotto:
-    # FILE assets sce_sys/icon0.png
 )
