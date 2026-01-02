@@ -3,17 +3,13 @@ cmake_minimum_required(VERSION 3.10)
 set(VITA_TITLE_ID "IPTV00001")
 project(VitaIPTV)
 
-# Includi le utility del VitaSDK
-if(DEFINED ENV{VITASDK})
-    include("$ENV{VITASDK}/share/vita.cmake")
-else()
-    message(FATAL_ERROR "VITASDK non trovato!")
-endif()
+include("${VITASDK}/share/vita.cmake")
 
-# Sorgenti
+# Il flag -Wl,-q è obbligatorio per usare SceAvPlayer
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wl,-q -O3")
+
 add_executable(VitaIPTV main.c)
 
-# Librerie Stub
 target_link_libraries(VitaIPTV
     vita2d
     SceAppMgr_stub
@@ -21,19 +17,19 @@ target_link_libraries(VitaIPTV
     SceDisplay_stub
     SceCtrl_stub
     SceSysmodule_stub
-    SceCommonDialog_stub
-    ScePgf_stub
     SceNet_stub
     SceNetCtl_stub
     SceAvPlayer_stub
     SceAudio_stub
+    SceVideodec_stub
+    SceCommonDialog_stub
+    ScePgf_stub
     SceLibKernel_stub
     z
     m
 )
 
-# Creazione pacchetto VPK
 vita_create_self(VitaIPTV.self VitaIPTV)
 vita_create_vpk(VitaIPTV.vpk ${VITA_TITLE_ID} VitaIPTV.self
-    NAME "Vita IPTV Player"
+    NAME "Vita IPTV Player HD"
 )
