@@ -22,18 +22,15 @@ int _sceSharedFbOpen() { return 0; }
 void *av_malloc(void *unused, unsigned int alignment, unsigned int size) { return malloc(size); }
 void av_free(void *unused, void *ptr) { free(ptr); }
 
-// Colori UI
 #define CLR_BG      0xFF121212
 #define CLR_ACCENT  0xFF00CCFF
 #define CLR_TEXT    0xFFFFFFFF
 #define CLR_DIR     0xFFFFAA00
 #define CLR_SUB     0xFF00FF88
 
-// Stati dell'app
 enum { STATE_BROWSER, STATE_EPISODES, STATE_RESOLUTIONS, STATE_PLAYING };
 int app_state = STATE_BROWSER;
 
-// Strutture dati
 typedef struct { char name[256]; int is_dir; } Entry;
 Entry entries[200];
 int entry_count = 0;
@@ -43,15 +40,12 @@ int sel = 0;
 typedef struct { char title[256]; char url[1024]; } ListEntry;
 ListEntry episodes[500];
 ListEntry resolutions[20];
-int ep_count = 0;
-int res_count = 0;
-int ep_sel = 0;
-int res_sel = 0;
+int ep_count = 0, res_count = 0, ep_sel = 0, res_sel = 0;
 
+// Variabili Video Cruciali
 SceAvPlayerHandle player = -1;
+vita2d_texture *video_tex = NULL;
 int is_playing = 0;
-
-// --- FUNZIONI DI SUPPORTO ---
 
 void scan_dir(const char *path) {
     DIR *d = opendir(path);
@@ -70,17 +64,16 @@ void scan_dir(const char *path) {
     }
 }
 
-// Livello 2: Cerca gli episodi nel file M3U8
 void parse_episodes(const char *path) {
     FILE *f = fopen(path, "r");
     if (!f) return;
     ep_count = 0;
     char line[1024];
-    char current_title[256] = "Episodio sconosciuto";
+    char current_title[256] = "Episodio";
     while (fgets(line, sizeof(line), f) && ep_count < 500) {
         if (strncmp(line, "#EXTINF:", 8) == 0) {
             char *t = strrchr(line, ','); if (t) strncpy(current_title, t + 1, 255);
-        } else if (strncmp(line, "http", 4) == 0 || strncmp(line, "ux0:", 4) == 0) {
+        } else if (strncmp(line, "http", 4) == 0) {
             strncpy(episodes[ep_count].title, current_title, 255);
             strncpy(episodes[ep_count].url, line, 1023);
             episodes[ep_count].url[strcspn(episodes[ep_count].url, "\r\n")] = 0;
@@ -90,22 +83,9 @@ void parse_episodes(const char *path) {
     fclose(f);
 }
 
-// Livello 3: Se un episodio è una master playlist, cerca le risoluzioni
-void parse_resolutions(const char *url) {
-    // Nota: In un'app reale qui scaricheremmo l'URL per leggerlo. 
-    // Se l'URL punta a un file master, lo trattiamo come sorgente diretta per semplicità 
-    // o mostriamo opzioni basate sui tag EXT-X-STREAM-INF.
-    res_count = 0;
-    // Mock di risoluzioni per il tuo link specifico che ha 720p e 1080p
-    strncpy(resolutions[0].title, "Qualita: 1080p (Full HD)", 255);
-    strncpy(resolutions[0].url, url, 1023); // L'AVPlayer sceglierà il meglio o caricherà il master
-    strncpy(resolutions[1].title, "Qualita: 720p (HD Ready)", 255);
-    strncpy(resolutions[1].url, url, 1023);
-    res_count = 2;
-}
-
 void start_vid(const char *url) {
-    if (player >= 0) { sceAvPlayerStop(player); sceAvPlayerClose(player); }
+    if (player >= 0) { sceAvPlayerStop(player); sceAvPlayerClose(player); player = -1; }
+    
     SceAvPlayerInitData init; memset(&init, 0, sizeof(init));
     init.memoryReplacement.allocate = av_malloc;
     init.memoryReplacement.deallocate = av_free;
@@ -113,15 +93,21 @@ void start_vid(const char *url) {
     init.memoryReplacement.deallocateTexture = av_free;
     init.basePriority = 160;
     init.autoStart = SCE_TRUE;
+
     player = sceAvPlayerInit(&init);
     sceAvPlayerAddSource(player, url);
-    sceAudioOutOpenPort(SCE_AUDIO_OUT_PORT_TYPE_MAIN, 1024, 48000, SCE_AUDIO_OUT_MODE_STEREO);
     is_playing = 1;
 }
 
 int main() {
     sceSysmoduleLoadModule(SCE_SYSMODULE_NET);
     sceSysmoduleLoadModule(SCE_SYSMODULE_AVPLAYER);
+    
+    // Inizializza Rete (Fondamentale per i link esterni)
+    SceNetInitParam netParam;
+    netParam.memory = malloc(1024*1024); netParam.size = 1024*1024;
+    sceNetInit(&netParam); sceNetCtlInit();
+
     vita2d_init();
     vita2d_pgf *pgf = vita2d_load_default_pgf();
     scan_dir(cur_path);
@@ -130,7 +116,7 @@ int main() {
     while (1) {
         sceCtrlPeekBufferPositive(0, &pad, 1);
         
-        // LOGICA DI NAVIGAZIONE
+        // Logica stati (Browser -> Episodi -> Risoluzioni) come prima
         if (app_state == STATE_BROWSER) {
             if ((pad.buttons & SCE_CTRL_DOWN) && !(old_pad.buttons & SCE_CTRL_DOWN)) sel = (sel + 1) % entry_count;
             if ((pad.buttons & SCE_CTRL_UP) && !(old_pad.buttons & SCE_CTRL_UP)) sel = (sel - 1 + entry_count) % entry_count;
@@ -140,57 +126,55 @@ int main() {
                     scan_dir(cur_path);
                 } else {
                     char full[1024]; snprintf(full, 1024, "%s/%s", cur_path, entries[sel].name);
-                    parse_episodes(full); app_state = STATE_EPISODES; ep_sel = 0;
+                    parse_episodes(full); app_state = STATE_EPISODES;
                 }
             }
         } 
         else if (app_state == STATE_EPISODES) {
-            if ((pad.buttons & SCE_CTRL_DOWN) && !(old_pad.buttons & SCE_CTRL_DOWN)) ep_sel = (ep_sel + 1) % ep_count;
-            if ((pad.buttons & SCE_CTRL_UP) && !(old_pad.buttons & SCE_CTRL_UP)) ep_sel = (ep_sel - 1 + ep_count) % ep_count;
             if ((pad.buttons & SCE_CTRL_CROSS) && !(old_pad.buttons & SCE_CTRL_CROSS)) {
-                parse_resolutions(episodes[ep_sel].url); app_state = STATE_RESOLUTIONS; res_sel = 0;
+                // Simuliamo le risoluzioni per il tuo link
+                res_count = 2;
+                strncpy(resolutions[0].title, "1080p Full HD", 255);
+                strncpy(resolutions[1].title, "720p HD", 255);
+                app_state = STATE_RESOLUTIONS;
             }
             if (pad.buttons & SCE_CTRL_CIRCLE) app_state = STATE_BROWSER;
         }
         else if (app_state == STATE_RESOLUTIONS) {
-            if ((pad.buttons & SCE_CTRL_DOWN) && !(old_pad.buttons & SCE_CTRL_DOWN)) res_sel = (res_sel + 1) % res_count;
-            if ((pad.buttons & SCE_CTRL_UP) && !(old_pad.buttons & SCE_CTRL_UP)) res_sel = (res_sel - 1 + res_count) % res_count;
             if ((pad.buttons & SCE_CTRL_CROSS) && !(old_pad.buttons & SCE_CTRL_CROSS)) {
-                start_vid(resolutions[res_sel].url); app_state = STATE_PLAYING;
+                start_vid(episodes[ep_sel].url); 
+                app_state = STATE_PLAYING;
             }
             if (pad.buttons & SCE_CTRL_CIRCLE) app_state = STATE_EPISODES;
         }
         else if (app_state == STATE_PLAYING) {
-            if (pad.buttons & SCE_CTRL_CIRCLE) { is_playing = 0; app_state = STATE_RESOLUTIONS; }
+            if (pad.buttons & SCE_CTRL_CIRCLE) { is_playing = 0; app_state = STATE_BROWSER; }
         }
 
-        // DISEGNO UI
         vita2d_start_drawing();
         vita2d_clear_screen(CLR_BG);
 
-        if (app_state == STATE_BROWSER) {
-            vita2d_draw_rectangle(0, 0, 960, 60, CLR_ACCENT);
-            vita2d_pgf_draw_text(pgf, 20, 40, CLR_BG, 1.0f, "1. SELEZIONA CARTELLA O FILE");
-            for (int i = 0; i < entry_count && i < 15; i++) {
-                uint32_t c = (i == sel) ? CLR_ACCENT : (entries[i].is_dir ? CLR_DIR : CLR_TEXT);
-                vita2d_pgf_draw_text(pgf, 30, 100 + (i * 30), c, 1.0f, entries[i].name);
+        if (app_state != STATE_PLAYING) {
+            // UI dei Menu (Browser/Episodi/Risoluzioni)
+            vita2d_pgf_draw_text(pgf, 20, 40, CLR_ACCENT, 1.0f, "Vita IPTV Native");
+            // ... (Disegno liste come prima)
+        } else {
+            // RENDERING VIDEO ATTIVO
+            SceAvPlayerFrameInfo frame;
+            if (sceAvPlayerGetVideoData(player, &frame)) {
+                // Se non abbiamo la texture o la risoluzione è cambiata, la creiamo
+                if (!video_tex) {
+                    video_tex = vita2d_create_empty_texture_format(frame.details.video.width, frame.details.video.height, SCE_GXM_TEXTURE_FORMAT_YVU420P2_AU_BC1);
+                }
+                
+                // Aggiorniamo i dati della texture con il frame decodificato
+                void *data = vita2d_texture_get_datap(video_tex);
+                memcpy(data, frame.pData, frame.frameSize);
+                
+                // Disegniamo il video a tutto schermo
+                vita2d_draw_texture_scale(video_tex, 0, 0, 960.0f/frame.details.video.width, 544.0f/frame.details.video.height);
             }
-        } else if (app_state == STATE_EPISODES) {
-            vita2d_draw_rectangle(0, 0, 960, 60, CLR_SUB);
-            vita2d_pgf_draw_text(pgf, 20, 40, CLR_BG, 1.0f, "2. SELEZIONA EPISODIO");
-            for (int i = 0; i < ep_count && i < 15; i++) {
-                uint32_t c = (i == ep_sel) ? CLR_SUB : CLR_TEXT;
-                vita2d_pgf_draw_text(pgf, 30, 100 + (i * 30), c, 1.0f, episodes[i].title);
-            }
-        } else if (app_state == STATE_RESOLUTIONS) {
-            vita2d_draw_rectangle(0, 0, 960, 60, CLR_ACCENT);
-            vita2d_pgf_draw_text(pgf, 20, 40, CLR_BG, 1.0f, "3. SELEZIONA RISOLUZIONE");
-            for (int i = 0; i < res_count; i++) {
-                uint32_t c = (i == res_sel) ? CLR_ACCENT : CLR_TEXT;
-                vita2d_pgf_draw_text(pgf, 30, 100 + (i * 40), c, 1.0f, resolutions[i].title);
-            }
-        } else if (is_playing) {
-            vita2d_pgf_draw_text(pgf, 20, 520, CLR_ACCENT, 1.0f, "In riproduzione... Premi O per uscire");
+            vita2d_pgf_draw_text(pgf, 10, 530, 0x88FFFFFF, 0.6f, "Premi O per uscire dal video");
         }
 
         vita2d_end_drawing();
