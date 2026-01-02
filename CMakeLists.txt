@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.10)
 
+# Carica il toolchain Vita
 if(DEFINED ENV{VITASDK})
     include("$ENV{VITASDK}/share/vita.cmake")
 else()
@@ -31,5 +32,8 @@ target_link_libraries(VitaIPTV
     SceAudio_stub
 )
 
-# MODIFICA QUI: Ho tolto gli spazi nel nome "My_IPTV_Player"
-vita_create_vpk(VitaIPTV "IPTV00001" "My_IPTV_Player")
+# FIX DEFINITIVO:
+# Usiamo un nome corto "IPTV" senza spazi o caratteri strani
+# E lo passiamo come variabile stringa.
+set(VITA_APP_TITLE "IPTV Player")
+vita_create_vpk(VitaIPTV "IPTV00001" "IPTV")
