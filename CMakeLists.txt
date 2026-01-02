@@ -1,20 +1,20 @@
 cmake_minimum_required(VERSION 3.10)
 
-project(VitaIPTV)
-
-# Verifica la presenza dell'SDK
-if(NOT DEFINED ENV{VITASDK})
+# --- QUESTA È LA PARTE CHE MANCAVA ---
+# Carica le funzioni speciali (come vita_create_vpk)
+if(DEFINED ENV{VITASDK})
+    include("$ENV{VITASDK}/share/vita.cmake")
+else()
     message(FATAL_ERROR "Please define VITASDK to point to your SDK path!")
 endif()
+# -------------------------------------
 
-# Flag di compilazione essenziali
+project(VitaIPTV)
+
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wl,-q -O2")
 
-# Definiamo l'eseguibile
 add_executable(VitaIPTV main.c)
 
-# Qui sta la correzione: Aggiunte le dipendenze mancanti (freetype, png, jpeg, z)
-# L'ordine è importante!
 target_link_libraries(VitaIPTV
     vita2d
     freetype
@@ -33,5 +33,5 @@ target_link_libraries(VitaIPTV
     SceAudio_stub
 )
 
-# Creazione del VPK (Sintassi corretta e semplificata)
+# Ora questo comando verrà riconosciuto
 vita_create_vpk(VitaIPTV "IPTV00001" "My IPTV Player")
