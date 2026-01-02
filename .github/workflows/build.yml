@@ -15,7 +15,8 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Configure CMake
-      run: cmake -B build -S .
+      # QUESTA È LA RIGA CHE ABBIAMO CORRETTO:
+      run: cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=${VITASDK}/share/vita.toolchain.cmake
 
     - name: Build
       run: cmake --build build
