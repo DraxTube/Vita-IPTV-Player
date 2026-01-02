@@ -1,5 +1,6 @@
 #include <psp2/kernel/processmgr.h>
 #include <psp2/ctrl.h>
+#include <psp2/power.h>
 #include <psp2/sysmodule.h>
 #include <psp2/net/net.h>
 #include <psp2/net/netctl.h>
@@ -21,7 +22,8 @@ int sceSharedFbEnd() { return 0; }
 int sceSharedFbBegin() { return 0; }
 int _sceSharedFbOpen() { return 0; }
 
-// --- FIX MEMORIA PER DECODER HARDWARE ---
+// --- FIX MEMORIA (CRITICO PER 1080p) ---
+// Usa memalign per garantire blocchi contigui per il decoder HW
 void *av_malloc(void *u, unsigned int a, unsigned int s) { 
     return memalign(a, s); 
 }
@@ -34,6 +36,7 @@ void av_free(void *u, void *p) {
 #define CLR_BG     0xFF121212
 #define CLR_DIR    0xFFFFAA00
 #define CLR_SUB    0xFF00FF88
+#define CLR_ERR    0xFF0000FF
 
 enum { STATE_BROWSER, STATE_EPISODES, STATE_RESOLUTIONS, STATE_PLAYING };
 int app_state = STATE_BROWSER;
@@ -76,14 +79,13 @@ void parse_m3u(const char *path) {
     if (!f) return;
     ep_count = 0; char line[1024], title[256] = "Canale";
     while (fgets(line, sizeof(line), f) && ep_count < 500) {
+        // Rimuovi newline
+        char *n = strpbrk(line, "\r\n"); if (n) *n = 0;
+        
         if (strncmp(line, "#EXTINF:", 8) == 0) {
             char *c = strrchr(line, ','); 
-            if (c) {
-                strncpy(title, c + 1, 255);
-                char *n = strpbrk(title, "\r\n"); if (n) *n = 0;
-            }
+            if (c) strncpy(title, c + 1, 255);
         } else if (strncmp(line, "http", 4) == 0) {
-            char *n = strpbrk(line, "\r\n"); if (n) *n = 0;
             strncpy(episodes[ep_count].title, title, 255);
             strncpy(episodes[ep_count].url, line, 1023);
             ep_count++;
@@ -93,115 +95,179 @@ void parse_m3u(const char *path) {
 }
 
 void start_vid(const char *url) {
+    // Pulizia precedente
     if (player >= 0) { sceAvPlayerStop(player); sceAvPlayerClose(player); player = -1; }
     if (audio_port >= 0) { sceAudioOutReleasePort(audio_port); audio_port = -1; }
     if (video_tex) { vita2d_free_texture(video_tex); video_tex = NULL; }
 
-    SceAvPlayerInitData init; memset(&init, 0, sizeof(init));
+    SceAvPlayerInitData init; 
+    memset(&init, 0, sizeof(init));
+    
+    // Gestione Memoria Avanzata
     init.memoryReplacement.allocate = av_malloc;
     init.memoryReplacement.deallocate = av_free;
     init.memoryReplacement.allocateTexture = av_malloc;
     init.memoryReplacement.deallocateTexture = av_free;
-    init.basePriority = 160;
-    init.numOutputVideoFrameBuffers = 2; 
+    
+    // Configurazione Player per 1080p
+    init.basePriority = 100; // Priorità thread
+    init.numOutputVideoFrameBuffers = 2; // 2 frame buffer bastano, 3 consumano troppa RAM col 1080p
     init.autoStart = SCE_TRUE;
     init.debugLevel = 0; 
     
     player = sceAvPlayerInit(&init);
+    
+    // --- USER AGENT TRUCCO ---
+    // Finge di essere un PC Windows con VLC/Browser per evitare blocchi IPTV
+    sceAvPlayerSetUserAgent(player, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36");
+
     sceAvPlayerAddSource(player, url);
+    
+    // Audio Port: 48kHz Stereo
     audio_port = sceAudioOutOpenPort(SCE_AUDIO_OUT_PORT_TYPE_MAIN, 1024, 48000, SCE_AUDIO_OUT_MODE_STEREO);
 }
 
 int main() {
-    // CARICAMENTO MODULI CORRETTO
+    // --- CARICAMENTO MODULI ---
     sceSysmoduleLoadModule(SCE_SYSMODULE_NET);
-    sceSysmoduleLoadModule(SCE_SYSMODULE_SSL);  // NECESSARIO per HTTPS
-    sceSysmoduleLoadModule(SCE_SYSMODULE_HTTP); // <--- CORRETTO (non HTTPS)
+    sceSysmoduleLoadModule(SCE_SYSMODULE_SSL);  // HTTPS
+    sceSysmoduleLoadModule(SCE_SYSMODULE_HTTP); // Client HTTP
     sceSysmoduleLoadModule(SCE_SYSMODULE_AVPLAYER);
     
+    // --- INIT RETE POTENZIATO ---
+    // 8MB di heap per la rete per gestire il buffering del 1080p
     SceNetInitParam netParam; 
-    netParam.memory = malloc(4*1024*1024); 
-    netParam.size = 4*1024*1024;
+    netParam.memory = malloc(8*1024*1024); 
+    netParam.size = 8*1024*1024;
     sceNetInit(&netParam); 
     sceNetCtlInit();
     
     vita2d_init();
+    vita2d_set_clear_color(CLR_BG);
     vita2d_pgf *pgf = vita2d_load_default_pgf();
+    
     scan_dir(cur_path);
 
-    strncpy(resolutions[0].title, "1080p / AUTO", 255);
-    strncpy(resolutions[1].title, "720p / FORZATO", 255);
+    strncpy(resolutions[0].title, "Standard (Usa come default)", 255);
+    strncpy(resolutions[1].title, "Alternativo", 255);
 
     SceCtrlData pad, old_pad;
+    memset(&old_pad, 0, sizeof(old_pad));
+
     while (1) {
         sceCtrlPeekBufferPositive(0, &pad, 1);
         
+        // Evita che lo schermo si spenga durante la visione
+        sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
+
         if (app_state == STATE_BROWSER) {
             if ((pad.buttons & SCE_CTRL_DOWN) && !(old_pad.buttons & SCE_CTRL_DOWN)) sel = (sel + 1) % entry_count;
             if ((pad.buttons & SCE_CTRL_UP) && !(old_pad.buttons & SCE_CTRL_UP)) sel = (sel - 1 + entry_count) % entry_count;
             if ((pad.buttons & SCE_CTRL_CROSS) && !(old_pad.buttons & SCE_CTRL_CROSS)) {
-                if (entries[sel].is_dir) {
-                    strcat(cur_path, "/"); strcat(cur_path, entries[sel].name); scan_dir(cur_path);
-                } else {
-                    char full[1024]; snprintf(full, 1024, "%s/%s", cur_path, entries[sel].name);
-                    parse_m3u(full); app_state = STATE_EPISODES; ep_sel = 0;
+                if (entry_count > 0) {
+                    if (entries[sel].is_dir) {
+                        char new_path[1024]; snprintf(new_path, 1024, "%s/%s", cur_path, entries[sel].name);
+                        strcpy(cur_path, new_path); 
+                        scan_dir(cur_path);
+                    } else {
+                        char full[1024]; snprintf(full, 1024, "%s/%s", cur_path, entries[sel].name);
+                        parse_m3u(full); 
+                        if (ep_count > 0) {
+                            app_state = STATE_EPISODES; 
+                            ep_sel = 0;
+                        }
+                    }
                 }
+            }
+            if ((pad.buttons & SCE_CTRL_TRIANGLE) && !(old_pad.buttons & SCE_CTRL_TRIANGLE)) {
+                // Torna indietro directory (semplificato)
+                strcpy(cur_path, "ux0:"); scan_dir(cur_path);
             }
         } else if (app_state == STATE_EPISODES) {
             if ((pad.buttons & SCE_CTRL_DOWN) && !(old_pad.buttons & SCE_CTRL_DOWN)) ep_sel = (ep_sel + 1) % ep_count;
             if ((pad.buttons & SCE_CTRL_UP) && !(old_pad.buttons & SCE_CTRL_UP)) ep_sel = (ep_sel - 1 + ep_count) % ep_count;
-            if ((pad.buttons & SCE_CTRL_CROSS) && !(old_pad.buttons & SCE_CTRL_CROSS)) app_state = STATE_RESOLUTIONS;
-            if (pad.buttons & SCE_CTRL_CIRCLE) app_state = STATE_BROWSER;
-        } else if (app_state == STATE_RESOLUTIONS) {
-            if ((pad.buttons & SCE_CTRL_DOWN) && !(old_pad.buttons & SCE_CTRL_DOWN)) res_sel = (res_sel + 1) % 2;
-            if ((pad.buttons & SCE_CTRL_UP) && !(old_pad.buttons & SCE_CTRL_UP)) res_sel = (res_sel - 1 + 2) % 2;
             if ((pad.buttons & SCE_CTRL_CROSS) && !(old_pad.buttons & SCE_CTRL_CROSS)) {
-                start_vid(episodes[ep_sel].url); app_state = STATE_PLAYING;
+                start_vid(episodes[ep_sel].url); 
+                app_state = STATE_PLAYING;
             }
-            if (pad.buttons & SCE_CTRL_CIRCLE) app_state = STATE_EPISODES;
+            if (pad.buttons & SCE_CTRL_CIRCLE) app_state = STATE_BROWSER;
         } else if (app_state == STATE_PLAYING) {
             if (pad.buttons & SCE_CTRL_CIRCLE) { 
                 if (player >= 0) { sceAvPlayerStop(player); sceAvPlayerClose(player); player = -1; }
-                app_state = STATE_BROWSER; 
+                if (video_tex) { vita2d_free_texture(video_tex); video_tex = NULL; }
+                app_state = STATE_EPISODES; 
             }
         }
 
         vita2d_start_drawing();
-        vita2d_clear_screen(CLR_BG);
+        vita2d_clear_screen();
 
         if (app_state == STATE_PLAYING) {
             SceAvPlayerFrameInfo a_info, v_info;
-            while (sceAvPlayerGetAudioData(player, &a_info)) sceAudioOutOutput(audio_port, a_info.pData);
             
-            if (sceAvPlayerGetVideoData(player, &v_info)) {
-                if (!video_tex) video_tex = vita2d_create_empty_texture_format(v_info.details.video.width, v_info.details.video.height, SCE_GXM_TEXTURE_FORMAT_YVU420P2_CSC1);
-                void *data = vita2d_texture_get_datap(video_tex);
-                memcpy(data, v_info.pData, (v_info.details.video.width * v_info.details.video.height * 1.5));
-                vita2d_draw_texture_scale(video_tex, 0, 0, 960.0f/v_info.details.video.width, 544.0f/v_info.details.video.height);
+            // Audio Output
+            if (player >= 0 && sceAvPlayerGetAudioData(player, &a_info)) {
+                 sceAudioOutOutput(audio_port, a_info.pData);
+            }
+            
+            // Video Output
+            if (player >= 0 && sceAvPlayerGetVideoData(player, &v_info)) {
+                // Crea texture solo se cambia risoluzione o è NULL
+                if (!video_tex || 
+                    vita2d_texture_get_width(video_tex) != v_info.details.video.width ||
+                    vita2d_texture_get_height(video_tex) != v_info.details.video.height) {
+                    
+                    if(video_tex) vita2d_free_texture(video_tex);
+                    video_tex = vita2d_create_empty_texture_format(
+                        v_info.details.video.width, 
+                        v_info.details.video.height, 
+                        SCE_GXM_TEXTURE_FORMAT_YVU420P2_CSC1
+                    );
+                }
+
+                if (video_tex) {
+                    void *data = vita2d_texture_get_datap(video_tex);
+                    // Copia YUV data
+                    memcpy(data, v_info.pData, (v_info.details.video.width * v_info.details.video.height * 1.5));
+                    
+                    // Scala a tutto schermo (960x544)
+                    float scale_x = 960.0f / v_info.details.video.width;
+                    float scale_y = 544.0f / v_info.details.video.height;
+                    vita2d_draw_texture_scale(video_tex, 0, 0, scale_x, scale_y);
+                }
             } else {
-                static int loader = 0; loader = (loader + 5) % 400;
-                vita2d_draw_rectangle(280, 272, 400, 20, 0xFF444444);
-                vita2d_draw_rectangle(280, 272, loader, 20, CLR_ACCENT);
-                vita2d_pgf_draw_text(pgf, 320, 250, CLR_ACCENT, 1.2f, "BUFFERING / CONNESSIONE...");
+                // UI di Caricamento
+                static int loader = 0; loader = (loader + 8) % 960;
+                vita2d_draw_rectangle(0, 540, 960, 4, 0xFF444444);
+                vita2d_draw_rectangle(loader, 540, 100, 4, CLR_ACCENT);
+                
+                vita2d_pgf_draw_text(pgf, 20, 520, CLR_ACCENT, 1.2f, "BUFFERING HD...");
+                if (player >= 0 && !sceAvPlayerIsActive(player)) {
+                     vita2d_pgf_draw_text(pgf, 20, 520, CLR_ERR, 1.2f, "ERRORE STREAM O TIMEOUT");
+                }
             }
         } else {
+            // INTERFACCIA UTENTE
+            vita2d_pgf_draw_text(pgf, 10, 25, CLR_ACCENT, 1.0f, "PS VITA IPTV PLAYER - HD EDITION");
+            vita2d_draw_line(0, 30, 960, 30, CLR_ACCENT);
+
             if (app_state == STATE_BROWSER) {
-                vita2d_pgf_draw_text(pgf, 20, 40, CLR_ACCENT, 1.0f, "1. BROWSER FILE");
-                for (int i = 0; i < entry_count && i < 15; i++) {
-                    uint32_t c = (i == sel) ? CLR_ACCENT : (entries[i].is_dir ? CLR_DIR : CLR_TEXT);
-                    vita2d_pgf_draw_text(pgf, 30, 100 + (i * 30), c, 1.0f, entries[i].name);
+                for (int i = 0; i < 14 && i < entry_count; i++) {
+                    int idx = (sel / 14) * 14 + i;
+                    if (idx >= entry_count) break;
+                    
+                    uint32_t c = (idx == sel) ? CLR_ACCENT : (entries[idx].is_dir ? CLR_DIR : CLR_TEXT);
+                    char display[300];
+                    snprintf(display, 300, "%s %s", entries[idx].is_dir ? "[DIR]" : "", entries[idx].name);
+                    vita2d_pgf_draw_text(pgf, 20, 60 + (i * 32), c, 1.0f, display);
                 }
             } else if (app_state == STATE_EPISODES) {
-                vita2d_pgf_draw_text(pgf, 20, 40, CLR_SUB, 1.0f, "2. SELEZIONA CANALE");
-                for (int i = 0; i < ep_count && i < 15; i++) {
-                    uint32_t c = (i == ep_sel) ? CLR_SUB : CLR_TEXT;
-                    vita2d_pgf_draw_text(pgf, 30, 100 + (i * 30), c, 1.0f, episodes[i].title);
-                }
-            } else if (app_state == STATE_RESOLUTIONS) {
-                vita2d_pgf_draw_text(pgf, 20, 40, CLR_ACCENT, 1.0f, "3. SCEGLI QUALITA'");
-                for (int i = 0; i < 2; i++) {
-                    uint32_t c = (i == res_sel) ? CLR_ACCENT : CLR_TEXT;
-                    vita2d_pgf_draw_text(pgf, 30, 120 + (i * 50), c, 1.3f, resolutions[i].title);
+                for (int i = 0; i < 14 && i < ep_count; i++) {
+                    int idx = (ep_sel / 14) * 14 + i;
+                    if (idx >= ep_count) break;
+
+                    uint32_t c = (idx == ep_sel) ? CLR_SUB : CLR_TEXT;
+                    vita2d_pgf_draw_text(pgf, 20, 60 + (i * 32), c, 1.0f, episodes[idx].title);
                 }
             }
         }
