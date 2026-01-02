@@ -73,7 +73,6 @@ void parse_m3u(const char *path) {
         } else if (strncmp(line, "http", 4) == 0) {
             strncpy(episodes[ep_count].title, title, 255);
             strncpy(episodes[ep_count].url, line, 1023);
-            episodes[ep_count].url[strcspn(episodes[ep_count].url, "\r\n")] = 0;
             ep_count++;
         }
     }
@@ -95,8 +94,6 @@ void start_vid(const char *url) {
     
     player = sceAvPlayerInit(&init);
     sceAvPlayerAddSource(player, url);
-    
-    // Apriamo l'audio in anticipo per "svegliare" il player
     audio_port = sceAudioOutOpenPort(SCE_AUDIO_OUT_PORT_TYPE_MAIN, 1024, 48000, SCE_AUDIO_OUT_MODE_STEREO);
 }
 
@@ -150,43 +147,39 @@ int main() {
         vita2d_clear_screen(CLR_BG);
 
         if (app_state == STATE_PLAYING) {
-            // GESTIONE AUDIO (Cruciale per non bloccare il video)
-            if (sceAvPlayerIsActive(player)) {
-                SceAvPlayerAudioOutRaw raw;
-                if (sceAvPlayerGetAudioData(player, &raw)) {
-                    sceAudioOutOutput(audio_port, raw.pData);
-                }
+            SceAvPlayerFrameInfo a_info, v_info;
+            // Gestione Audio
+            if (sceAvPlayerGetAudioData(player, &a_info)) {
+                sceAudioOutOutput(audio_port, a_info.pData);
             }
-
-            SceAvPlayerFrameInfo frame;
-            if (sceAvPlayerGetVideoData(player, &frame)) {
-                if (!video_tex) video_tex = vita2d_create_empty_texture_format(frame.details.video.width, frame.details.video.height, SCE_GXM_TEXTURE_FORMAT_YVU420P2_CSC1);
+            // Gestione Video
+            if (sceAvPlayerGetVideoData(player, &v_info)) {
+                if (!video_tex) video_tex = vita2d_create_empty_texture_format(v_info.details.video.width, v_info.details.video.height, SCE_GXM_TEXTURE_FORMAT_YVU420P2_CSC1);
                 void *data = vita2d_texture_get_datap(video_tex);
-                memcpy(data, frame.pData, (frame.details.video.width * frame.details.video.height * 1.5));
-                vita2d_draw_texture_scale(video_tex, 0, 0, 960.0f/frame.details.video.width, 544.0f/frame.details.video.height);
+                memcpy(data, v_info.pData, (v_info.details.video.width * v_info.details.video.height * 1.5));
+                vita2d_draw_texture_scale(video_tex, 0, 0, 960.0f/v_info.details.video.width, 544.0f/v_info.details.video.height);
             } else {
                 static int loader = 0; loader = (loader + 5) % 400;
                 vita2d_draw_rectangle(280, 272, 400, 20, 0xFF444444);
                 vita2d_draw_rectangle(280, 272, loader, 20, CLR_ACCENT);
                 vita2d_pgf_draw_text(pgf, 320, 250, CLR_ACCENT, 1.2f, "RETE ATTIVA...");
-                vita2d_pgf_draw_text(pgf, 290, 320, CLR_TEXT, 0.8f, "Sincronizzazione stream HLS...");
             }
         } else {
-            // DISEGNO MENU (Ripristinato e fisso)
+            // DISEGNO MENU (Browser/Episodi/Risoluzioni)
             if (app_state == STATE_BROWSER) {
-                vita2d_pgf_draw_text(pgf, 20, 40, CLR_ACCENT, 1.0f, "1. BROWSER FILE (ux0:)");
+                vita2d_pgf_draw_text(pgf, 20, 40, CLR_ACCENT, 1.0f, "1. FILE BROWSER");
                 for (int i = 0; i < entry_count && i < 15; i++) {
                     uint32_t c = (i == sel) ? CLR_ACCENT : (entries[i].is_dir ? CLR_DIR : CLR_TEXT);
                     vita2d_pgf_draw_text(pgf, 30, 100 + (i * 30), c, 1.0f, entries[i].name);
                 }
             } else if (app_state == STATE_EPISODES) {
-                vita2d_pgf_draw_text(pgf, 20, 40, CLR_SUB, 1.0f, "2. LISTA CANALI / EPISODI");
+                vita2d_pgf_draw_text(pgf, 20, 40, CLR_SUB, 1.0f, "2. EPISODI");
                 for (int i = 0; i < ep_count && i < 15; i++) {
                     uint32_t c = (i == ep_sel) ? CLR_SUB : CLR_TEXT;
                     vita2d_pgf_draw_text(pgf, 30, 100 + (i * 30), c, 1.0f, episodes[i].title);
                 }
             } else if (app_state == STATE_RESOLUTIONS) {
-                vita2d_pgf_draw_text(pgf, 20, 40, CLR_ACCENT, 1.0f, "3. SELEZIONA RISOLUZIONE");
+                vita2d_pgf_draw_text(pgf, 20, 40, CLR_ACCENT, 1.0f, "3. QUALITA'");
                 for (int i = 0; i < res_count; i++) {
                     uint32_t c = (i == res_sel) ? CLR_ACCENT : CLR_TEXT;
                     vita2d_pgf_draw_text(pgf, 30, 100 + (i * 40), c, 1.0f, resolutions[i].title);
