@@ -2,6 +2,7 @@
 #include <psp2/ctrl.h>
 #include <psp2/sysmodule.h>
 #include <psp2/net/net.h>
+#include <psp2/net/netctl.h> // Aggiunto per sceNetCtlInit
 #include <psp2/avplayer.h>
 #include <psp2/audioout.h>
 #include <vita2d.h>
@@ -11,7 +12,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 
-// --- HACK LINKER ---
+// --- HACK PER LINKER ---
 int sceSharedFbClose() { return 0; }
 int sceSharedFbOpen() { return 0; }
 int sceSharedFbGetInfo() { return 0; }
@@ -42,11 +43,11 @@ ListEntry episodes[500];
 ListEntry resolutions[20];
 int ep_count = 0, res_count = 0, ep_sel = 0, res_sel = 0;
 
-// Variabili Video Cruciali
 SceAvPlayerHandle player = -1;
 vita2d_texture *video_tex = NULL;
 int is_playing = 0;
 
+// ... (Le funzioni scan_dir e parse_episodes rimangono identiche) ...
 void scan_dir(const char *path) {
     DIR *d = opendir(path);
     entry_count = 0; sel = 0;
@@ -85,7 +86,8 @@ void parse_episodes(const char *path) {
 
 void start_vid(const char *url) {
     if (player >= 0) { sceAvPlayerStop(player); sceAvPlayerClose(player); player = -1; }
-    
+    if (video_tex) { vita2d_free_texture(video_tex); video_tex = NULL; }
+
     SceAvPlayerInitData init; memset(&init, 0, sizeof(init));
     init.memoryReplacement.allocate = av_malloc;
     init.memoryReplacement.deallocate = av_free;
@@ -103,10 +105,10 @@ int main() {
     sceSysmoduleLoadModule(SCE_SYSMODULE_NET);
     sceSysmoduleLoadModule(SCE_SYSMODULE_AVPLAYER);
     
-    // Inizializza Rete (Fondamentale per i link esterni)
     SceNetInitParam netParam;
     netParam.memory = malloc(1024*1024); netParam.size = 1024*1024;
-    sceNetInit(&netParam); sceNetCtlInit();
+    sceNetInit(&netParam); 
+    sceNetCtlInit();
 
     vita2d_init();
     vita2d_pgf *pgf = vita2d_load_default_pgf();
@@ -116,7 +118,6 @@ int main() {
     while (1) {
         sceCtrlPeekBufferPositive(0, &pad, 1);
         
-        // Logica stati (Browser -> Episodi -> Risoluzioni) come prima
         if (app_state == STATE_BROWSER) {
             if ((pad.buttons & SCE_CTRL_DOWN) && !(old_pad.buttons & SCE_CTRL_DOWN)) sel = (sel + 1) % entry_count;
             if ((pad.buttons & SCE_CTRL_UP) && !(old_pad.buttons & SCE_CTRL_UP)) sel = (sel - 1 + entry_count) % entry_count;
@@ -132,7 +133,6 @@ int main() {
         } 
         else if (app_state == STATE_EPISODES) {
             if ((pad.buttons & SCE_CTRL_CROSS) && !(old_pad.buttons & SCE_CTRL_CROSS)) {
-                // Simuliamo le risoluzioni per il tuo link
                 res_count = 2;
                 strncpy(resolutions[0].title, "1080p Full HD", 255);
                 strncpy(resolutions[1].title, "720p HD", 255);
@@ -148,33 +148,40 @@ int main() {
             if (pad.buttons & SCE_CTRL_CIRCLE) app_state = STATE_EPISODES;
         }
         else if (app_state == STATE_PLAYING) {
-            if (pad.buttons & SCE_CTRL_CIRCLE) { is_playing = 0; app_state = STATE_BROWSER; }
+            if (pad.buttons & SCE_CTRL_CIRCLE) { 
+                is_playing = 0; 
+                if (player >= 0) { sceAvPlayerStop(player); sceAvPlayerClose(player); player = -1; }
+                app_state = STATE_BROWSER; 
+            }
         }
 
         vita2d_start_drawing();
         vita2d_clear_screen(CLR_BG);
 
         if (app_state != STATE_PLAYING) {
-            // UI dei Menu (Browser/Episodi/Risoluzioni)
             vita2d_pgf_draw_text(pgf, 20, 40, CLR_ACCENT, 1.0f, "Vita IPTV Native");
-            // ... (Disegno liste come prima)
+            // Disegno liste...
+            if (app_state == STATE_BROWSER) {
+                for (int i = 0; i < entry_count && i < 15; i++) {
+                    uint32_t c = (i == sel) ? CLR_ACCENT : (entries[i].is_dir ? CLR_DIR : CLR_TEXT);
+                    vita2d_pgf_draw_text(pgf, 30, 100 + (i * 30), c, 1.0f, entries[i].name);
+                }
+            }
         } else {
-            // RENDERING VIDEO ATTIVO
             SceAvPlayerFrameInfo frame;
             if (sceAvPlayerGetVideoData(player, &frame)) {
-                // Se non abbiamo la texture o la risoluzione è cambiata, la creiamo
                 if (!video_tex) {
-                    video_tex = vita2d_create_empty_texture_format(frame.details.video.width, frame.details.video.height, SCE_GXM_TEXTURE_FORMAT_YVU420P2_AU_BC1);
+                    // CORRETTO: SCE_GXM_TEXTURE_FORMAT_YVU420P2_CSC1
+                    video_tex = vita2d_create_empty_texture_format(frame.details.video.width, frame.details.video.height, SCE_GXM_TEXTURE_FORMAT_YVU420P2_CSC1);
                 }
                 
-                // Aggiorniamo i dati della texture con il frame decodificato
                 void *data = vita2d_texture_get_datap(video_tex);
-                memcpy(data, frame.pData, frame.frameSize);
+                // CORRETTO: frame.size
+                memcpy(data, frame.pData, frame.size);
                 
-                // Disegniamo il video a tutto schermo
                 vita2d_draw_texture_scale(video_tex, 0, 0, 960.0f/frame.details.video.width, 544.0f/frame.details.video.height);
             }
-            vita2d_pgf_draw_text(pgf, 10, 530, 0x88FFFFFF, 0.6f, "Premi O per uscire dal video");
+            vita2d_pgf_draw_text(pgf, 10, 530, 0x88FFFFFF, 0.6f, "Premi O per uscire");
         }
 
         vita2d_end_drawing();
