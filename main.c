@@ -1,7 +1,10 @@
-#include <psp2/kernel/process.h>
+#include <psp2/kernel/processmgr.h>
 #include <psp2/ctrl.h>
 #include <psp2/sysmodule.h>
+#include <psp2/net/net.h>
 #include <vita2d.h>
+#include <stdlib.h>
+#include <string.h>
 
 // Colori
 #define WHITE 0xFFFFFFFF
@@ -41,7 +44,6 @@ int main() {
 
         if (pad.buttons & SCE_CTRL_CROSS) {
             vita2d_pgf_draw_text(pgf, 20, 150, RED, 1.0f, "Tentativo connessione stream...");
-            // Qui andrebbe inserita la logica di SceAvPlayer
         }
 
         vita2d_end_drawing();
@@ -53,6 +55,7 @@ int main() {
     vita2d_free_pgf(pgf);
     sceSysmoduleUnloadModule(SCE_SYSMODULE_NET);
     sceSysmoduleUnloadModule(SCE_SYSMODULE_AVPLAYER);
+    
     sceKernelExitProcess(0);
     return 0;
 }
