@@ -31,10 +31,13 @@ void av_free(void *u, void *p) { free(p); }
 enum { STATE_BROWSER, STATE_EPISODES, STATE_RESOLUTIONS, STATE_PLAYING };
 int app_state = STATE_BROWSER;
 
+// Variabili Browser
 typedef struct { char name[256]; int is_dir; } Entry;
 Entry entries[200];
 int entry_count = 0, sel = 0;
+char cur_path[512] = "ux0:"; // <-- Questa mancava!
 
+// Variabili Playlist
 typedef struct { char title[256]; char url[1024]; } ListEntry;
 ListEntry episodes[500];
 ListEntry resolutions[2]; 
@@ -43,7 +46,6 @@ int ep_count = 0, ep_sel = 0, res_sel = 0;
 SceAvPlayerHandle player = -1;
 vita2d_texture *video_tex = NULL;
 int audio_port = -1;
-uint64_t start_tick = 0;
 
 void scan_dir(const char *path) {
     DIR *d = opendir(path);
@@ -108,7 +110,7 @@ int main() {
     sceNetInit(&netParam); sceNetCtlInit();
     vita2d_init();
     vita2d_pgf *pgf = vita2d_load_default_pgf();
-    scan_dir("ux0:");
+    scan_dir(cur_path);
 
     strncpy(resolutions[0].title, "1080p / AUTO", 255);
     strncpy(resolutions[1].title, "720p / FORZATO", 255);
@@ -132,14 +134,14 @@ int main() {
             if ((pad.buttons & SCE_CTRL_DOWN) && !(old_pad.buttons & SCE_CTRL_DOWN)) ep_sel = (ep_sel + 1) % ep_count;
             if ((pad.buttons & SCE_CTRL_UP) && !(old_pad.buttons & SCE_CTRL_UP)) ep_sel = (ep_sel - 1 + ep_count) % ep_count;
             if ((pad.buttons & SCE_CTRL_CROSS) && !(old_pad.buttons & SCE_CTRL_CROSS)) app_state = STATE_RESOLUTIONS;
-            if ((pad.buttons & SCE_CTRL_CIRCLE) && !(old_pad.buttons & SCE_CTRL_CIRCLE)) app_state = STATE_BROWSER;
+            if (pad.buttons & SCE_CTRL_CIRCLE) app_state = STATE_BROWSER;
         } else if (app_state == STATE_RESOLUTIONS) {
             if ((pad.buttons & SCE_CTRL_DOWN) && !(old_pad.buttons & SCE_CTRL_DOWN)) res_sel = (res_sel + 1) % 2;
             if ((pad.buttons & SCE_CTRL_UP) && !(old_pad.buttons & SCE_CTRL_UP)) res_sel = (res_sel - 1 + 2) % 2;
             if ((pad.buttons & SCE_CTRL_CROSS) && !(old_pad.buttons & SCE_CTRL_CROSS)) {
                 start_vid(episodes[ep_sel].url); app_state = STATE_PLAYING;
             }
-            if ((pad.buttons & SCE_CTRL_CIRCLE) && !(old_pad.buttons & SCE_CTRL_CIRCLE)) app_state = STATE_EPISODES;
+            if (pad.buttons & SCE_CTRL_CIRCLE) app_state = STATE_EPISODES;
         } else if (app_state == STATE_PLAYING) {
             if (pad.buttons & SCE_CTRL_CIRCLE) { 
                 if (player >= 0) { sceAvPlayerStop(player); sceAvPlayerClose(player); player = -1; }
@@ -152,11 +154,8 @@ int main() {
 
         if (app_state == STATE_PLAYING) {
             SceAvPlayerFrameInfo a_info, v_info;
-            // Force-Read Audio (Sblocca il decoder se il buffer è pieno)
-            while (sceAvPlayerGetAudioData(player, &a_info)) {
-                sceAudioOutOutput(audio_port, a_info.pData);
-            }
-            // Rendering Video
+            while (sceAvPlayerGetAudioData(player, &a_info)) sceAudioOutOutput(audio_port, a_info.pData);
+            
             if (sceAvPlayerGetVideoData(player, &v_info)) {
                 if (!video_tex) video_tex = vita2d_create_empty_texture_format(v_info.details.video.width, v_info.details.video.height, SCE_GXM_TEXTURE_FORMAT_YVU420P2_CSC1);
                 void *data = vita2d_texture_get_datap(video_tex);
@@ -166,13 +165,11 @@ int main() {
                 static int loader = 0; loader = (loader + 5) % 400;
                 vita2d_draw_rectangle(280, 272, 400, 20, 0xFF444444);
                 vita2d_draw_rectangle(280, 272, loader, 20, CLR_ACCENT);
-                vita2d_pgf_draw_text(pgf, 310, 250, CLR_ACCENT, 1.2f, "FORZATURA STREAM...");
-                vita2d_pgf_draw_text(pgf, 260, 320, CLR_TEXT, 0.8f, "Tentativo di decodifica hardware HLS");
+                vita2d_pgf_draw_text(pgf, 320, 250, CLR_ACCENT, 1.2f, "RETE ATTIVA...");
             }
         } else {
-            // DISEGNO MENU
             if (app_state == STATE_BROWSER) {
-                vita2d_pgf_draw_text(pgf, 20, 40, CLR_ACCENT, 1.0f, "1. SELEZIONA FILE M3U8");
+                vita2d_pgf_draw_text(pgf, 20, 40, CLR_ACCENT, 1.0f, "1. BROWSER FILE");
                 for (int i = 0; i < entry_count && i < 15; i++) {
                     uint32_t c = (i == sel) ? CLR_ACCENT : (entries[i].is_dir ? CLR_DIR : CLR_TEXT);
                     vita2d_pgf_draw_text(pgf, 30, 100 + (i * 30), c, 1.0f, entries[i].name);
@@ -184,7 +181,7 @@ int main() {
                     vita2d_pgf_draw_text(pgf, 30, 100 + (i * 30), c, 1.0f, episodes[i].title);
                 }
             } else if (app_state == STATE_RESOLUTIONS) {
-                vita2d_pgf_draw_text(pgf, 20, 40, CLR_ACCENT, 1.0f, "3. SCEGLI QUALITA' E AVVIA");
+                vita2d_pgf_draw_text(pgf, 20, 40, CLR_ACCENT, 1.0f, "3. SCEGLI QUALITA'");
                 for (int i = 0; i < 2; i++) {
                     uint32_t c = (i == res_sel) ? CLR_ACCENT : CLR_TEXT;
                     vita2d_pgf_draw_text(pgf, 30, 120 + (i * 50), c, 1.3f, resolutions[i].title);
