@@ -5,8 +5,7 @@ project(VitaIPTV)
 
 include("${VITASDK}/share/vita.cmake")
 
-# Ottimizzazioni e flag per AvPlayer
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wl,-q -O3 -fno-strict-aliasing")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wl,-q -O3")
 
 add_executable(VitaIPTV main.c)
 
@@ -32,5 +31,5 @@ target_link_libraries(VitaIPTV
 
 vita_create_self(VitaIPTV.self VitaIPTV)
 vita_create_vpk(VitaIPTV.vpk ${VITA_TITLE_ID} VitaIPTV.self
-    NAME "Vita IPTV Player Native"
+    NAME "Vita IPTV HD Player"
 )
