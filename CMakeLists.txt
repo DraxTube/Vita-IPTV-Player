@@ -25,6 +25,8 @@ target_link_libraries(VitaIPTV
     ScePgf_stub
     SceLibKernel_stub
     SceAppUtil_stub
+    SceSsl_stub    # AGGIUNTO: Necessario per HTTPS
+    SceHttps_stub  # AGGIUNTO: Necessario per HTTPS
     z
     m
 )
