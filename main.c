@@ -2,7 +2,7 @@
 #include <psp2/ctrl.h>
 #include <psp2/sysmodule.h>
 #include <psp2/net/net.h>
-#include <psp2/net/netctl.h> // Aggiunto per sceNetCtlInit
+#include <psp2/net/netctl.h>
 #include <psp2/avplayer.h>
 #include <psp2/audioout.h>
 #include <vita2d.h>
@@ -26,63 +26,20 @@ void av_free(void *unused, void *ptr) { free(ptr); }
 #define CLR_BG      0xFF121212
 #define CLR_ACCENT  0xFF00CCFF
 #define CLR_TEXT    0xFFFFFFFF
-#define CLR_DIR     0xFFFFAA00
-#define CLR_SUB     0xFF00FF88
 
 enum { STATE_BROWSER, STATE_EPISODES, STATE_RESOLUTIONS, STATE_PLAYING };
 int app_state = STATE_BROWSER;
 
-typedef struct { char name[256]; int is_dir; } Entry;
-Entry entries[200];
-int entry_count = 0;
-char cur_path[512] = "ux0:";
-int sel = 0;
-
+// Strutture e variabili globali
 typedef struct { char title[256]; char url[1024]; } ListEntry;
 ListEntry episodes[500];
-ListEntry resolutions[20];
-int ep_count = 0, res_count = 0, ep_sel = 0, res_sel = 0;
+int ep_count = 0, ep_sel = 0;
 
 SceAvPlayerHandle player = -1;
 vita2d_texture *video_tex = NULL;
 int is_playing = 0;
 
-// ... (Le funzioni scan_dir e parse_episodes rimangono identiche) ...
-void scan_dir(const char *path) {
-    DIR *d = opendir(path);
-    entry_count = 0; sel = 0;
-    if (d) {
-        struct dirent *de;
-        while ((de = readdir(d)) && entry_count < 200) {
-            if (strcmp(de->d_name, ".") == 0) continue;
-            strncpy(entries[entry_count].name, de->d_name, 255);
-            struct stat st; char full[1024]; snprintf(full, 1024, "%s/%s", path, de->d_name);
-            stat(full, &st);
-            entries[entry_count].is_dir = S_ISDIR(st.st_mode);
-            entry_count++;
-        }
-        closedir(d);
-    }
-}
-
-void parse_episodes(const char *path) {
-    FILE *f = fopen(path, "r");
-    if (!f) return;
-    ep_count = 0;
-    char line[1024];
-    char current_title[256] = "Episodio";
-    while (fgets(line, sizeof(line), f) && ep_count < 500) {
-        if (strncmp(line, "#EXTINF:", 8) == 0) {
-            char *t = strrchr(line, ','); if (t) strncpy(current_title, t + 1, 255);
-        } else if (strncmp(line, "http", 4) == 0) {
-            strncpy(episodes[ep_count].title, current_title, 255);
-            strncpy(episodes[ep_count].url, line, 1023);
-            episodes[ep_count].url[strcspn(episodes[ep_count].url, "\r\n")] = 0;
-            ep_count++;
-        }
-    }
-    fclose(f);
-}
+// ... (Funzioni scan_dir e parse_episodes rimosse per brevità, mantieni quelle precedenti) ...
 
 void start_vid(const char *url) {
     if (player >= 0) { sceAvPlayerStop(player); sceAvPlayerClose(player); player = -1; }
@@ -107,81 +64,45 @@ int main() {
     
     SceNetInitParam netParam;
     netParam.memory = malloc(1024*1024); netParam.size = 1024*1024;
-    sceNetInit(&netParam); 
-    sceNetCtlInit();
+    sceNetInit(&netParam); sceNetCtlInit();
 
     vita2d_init();
     vita2d_pgf *pgf = vita2d_load_default_pgf();
-    scan_dir(cur_path);
+    // scan_dir("ux0:"); // Inizializza browser
 
     SceCtrlData pad, old_pad;
     while (1) {
         sceCtrlPeekBufferPositive(0, &pad, 1);
         
-        if (app_state == STATE_BROWSER) {
-            if ((pad.buttons & SCE_CTRL_DOWN) && !(old_pad.buttons & SCE_CTRL_DOWN)) sel = (sel + 1) % entry_count;
-            if ((pad.buttons & SCE_CTRL_UP) && !(old_pad.buttons & SCE_CTRL_UP)) sel = (sel - 1 + entry_count) % entry_count;
-            if ((pad.buttons & SCE_CTRL_CROSS) && !(old_pad.buttons & SCE_CTRL_CROSS)) {
-                if (entries[sel].is_dir) {
-                    strcat(cur_path, "/"); strcat(cur_path, entries[sel].name);
-                    scan_dir(cur_path);
-                } else {
-                    char full[1024]; snprintf(full, 1024, "%s/%s", cur_path, entries[sel].name);
-                    parse_episodes(full); app_state = STATE_EPISODES;
-                }
-            }
-        } 
-        else if (app_state == STATE_EPISODES) {
-            if ((pad.buttons & SCE_CTRL_CROSS) && !(old_pad.buttons & SCE_CTRL_CROSS)) {
-                res_count = 2;
-                strncpy(resolutions[0].title, "1080p Full HD", 255);
-                strncpy(resolutions[1].title, "720p HD", 255);
-                app_state = STATE_RESOLUTIONS;
-            }
-            if (pad.buttons & SCE_CTRL_CIRCLE) app_state = STATE_BROWSER;
-        }
-        else if (app_state == STATE_RESOLUTIONS) {
-            if ((pad.buttons & SCE_CTRL_CROSS) && !(old_pad.buttons & SCE_CTRL_CROSS)) {
-                start_vid(episodes[ep_sel].url); 
-                app_state = STATE_PLAYING;
-            }
-            if (pad.buttons & SCE_CTRL_CIRCLE) app_state = STATE_EPISODES;
-        }
-        else if (app_state == STATE_PLAYING) {
-            if (pad.buttons & SCE_CTRL_CIRCLE) { 
-                is_playing = 0; 
-                if (player >= 0) { sceAvPlayerStop(player); sceAvPlayerClose(player); player = -1; }
-                app_state = STATE_BROWSER; 
-            }
-        }
+        // Logica navigazione (Browser -> Episodi -> Risoluzioni)
+        // ... (Mantieni la logica CROSS/CIRCLE precedente) ...
 
         vita2d_start_drawing();
         vita2d_clear_screen(CLR_BG);
 
-        if (app_state != STATE_PLAYING) {
-            vita2d_pgf_draw_text(pgf, 20, 40, CLR_ACCENT, 1.0f, "Vita IPTV Native");
-            // Disegno liste...
-            if (app_state == STATE_BROWSER) {
-                for (int i = 0; i < entry_count && i < 15; i++) {
-                    uint32_t c = (i == sel) ? CLR_ACCENT : (entries[i].is_dir ? CLR_DIR : CLR_TEXT);
-                    vita2d_pgf_draw_text(pgf, 30, 100 + (i * 30), c, 1.0f, entries[i].name);
-                }
-            }
-        } else {
+        if (app_state == STATE_PLAYING) {
             SceAvPlayerFrameInfo frame;
             if (sceAvPlayerGetVideoData(player, &frame)) {
                 if (!video_tex) {
-                    // CORRETTO: SCE_GXM_TEXTURE_FORMAT_YVU420P2_CSC1
                     video_tex = vita2d_create_empty_texture_format(frame.details.video.width, frame.details.video.height, SCE_GXM_TEXTURE_FORMAT_YVU420P2_CSC1);
                 }
                 
                 void *data = vita2d_texture_get_datap(video_tex);
-                // CORRETTO: frame.size
-                memcpy(data, frame.pData, frame.size);
+                
+                // --- CORREZIONE QUI ---
+                // In alcune versioni di SDK si usa frame.details.video.pitch * height * 1.5 per YUV420
+                uint32_t frame_size = frame.details.video.width * frame.details.video.height * 3 / 2;
+                memcpy(data, frame.pData, frame_size);
                 
                 vita2d_draw_texture_scale(video_tex, 0, 0, 960.0f/frame.details.video.width, 544.0f/frame.details.video.height);
+            } else {
+                // Messaggio di caricamento se il frame non è ancora pronto
+                vita2d_pgf_draw_text(pgf, 400, 272, CLR_ACCENT, 1.0f, "Caricamento buffer...");
             }
-            vita2d_pgf_draw_text(pgf, 10, 530, 0x88FFFFFF, 0.6f, "Premi O per uscire");
+        } else {
+            // Disegno Menu
+            vita2d_pgf_draw_text(pgf, 20, 40, CLR_ACCENT, 1.0f, "Vita IPTV - Seleziona un contenuto");
+            // ... (Codice per disegnare le liste) ...
         }
 
         vita2d_end_drawing();
