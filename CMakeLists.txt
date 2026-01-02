@@ -3,13 +3,14 @@ cmake_minimum_required(VERSION 3.10)
 set(VITA_TITLE_ID "VITAIPTV1")
 project(VitaIPTV)
 
-# Includi le utility del VitaSDK [cite: 1]
+# Includi le utility del VitaSDK
 include("${VITASDK}/share/vita.cmake")
 
-# Sorgenti [cite: 1]
+# Sorgenti
 add_executable(VitaIPTV main.c)
 
-# LINKER FIX: Utilizzo dei nomi corretti e universali per il toolchain
+# LINKER FIX: Rimossa SceFont_stub che causava l'errore.
+# ScePgf_stub è solitamente sufficiente per il testo in vita2d.
 target_link_libraries(VitaIPTV
     vita2d
     SceAppMgr_stub
@@ -19,7 +20,6 @@ target_link_libraries(VitaIPTV
     SceSysmodule_stub
     SceCommonDialog_stub
     ScePgf_stub
-    SceFont_stub
     SceNet_stub
     SceNetCtl_stub
     SceAvPlayer_stub
@@ -29,10 +29,11 @@ target_link_libraries(VitaIPTV
     m
 )
 
-# Creazione file .self [cite: 1]
+# Creazione file .self
 vita_create_self(VitaIPTV.self VitaIPTV)
 
-# Creazione VPK finale [cite: 2, 3]
+# Creazione VPK finale
+# Assicurati che non ci siano parametri extra come "IPTV" qui.
 vita_create_vpk(VitaIPTV.vpk ${VITA_TITLE_ID} VitaIPTV.self
     NAME "Vita IPTV Player"
 )
